@@ -1,0 +1,129 @@
+# 
+# Pull base image
+# ---------------
+FROM oraclelinux:7-slim as base
+
+MAINTAINER liaobaikai<baikai.liao@qq.com>
+LABEL org.opencontainers.image.authors="liaobaikai"
+
+ENV ORACLE_BASE=/u01/app/oracle \
+    ORACLE_HOME=/u01/app/oracle/product/11.2.0/db_1 \
+    ORACLE_SID=ORCL \
+    INSTALL_FILE_1="p13390677_112040_Linux-x86-64_1of7.zip" \
+    INSTALL_FILE_2="p13390677_112040_Linux-x86-64_2of7.zip" \
+    INSTALL_PSU="p28204707_112040_Linux-x86-64.zip" \
+    INSTALL_OPATCH="p6880880_112000_Linux-x86-64.zip" \
+    INSTALL_OCM_FILE="ocm.rsp" \
+    INSTALL_DIR="/stage" \
+    CONFIG_RSP="db_install.rsp" \
+    DBCA_CONFIG_RSP="dbca.rsp" \
+    RUN_FILE="runOracle.sh"
+
+# Use second ENV so that variable get substituted
+ENV PATH=$ORACLE_HOME/bin:$PATH
+
+
+RUN groupadd oinstall \
+    && groupadd dba \
+    && useradd -g oinstall -G dba oracle \
+    && echo "oracle:oracle" | chpasswd \
+    && mkdir -p $ORACLE_HOME \
+    && chown -R oracle:oinstall /u01 \
+    && chmod -R 755 /u01 \ 
+    && printf '\n' >> /home/oracle/.bash_profile \
+    && printf 'export ORACLE_BASE=/u01/app/oracle\n' >> /home/oracle/.bash_profile  \
+    && printf 'export ORACLE_HOME=$ORACLE_BASE/product/11.2.0/db_1\n' >> /home/oracle/.bash_profile \
+    && printf 'export ORACLE_SID=ORCL\n' >> /home/oracle/.bash_profile \
+    && printf 'export PATH=$ORACLE_HOME/bin:$PATH\n' >> /home/oracle/.bash_profile \ 
+    && printf 'export LANG=en_US.UTF-8\n' >> /home/oracle/.bash_profile \
+    && yum -y install psmisc unzip vi binutils compat-libstdc++-33 compat-libstdc++-33.i686 elfutils-libelf elfutils-libelf-devel gcc gcc-c++ glibc glibc.i686 glibc-common glibc-devel glibc-devel.i686 glibc-headers ksh libaio libaio.i686 libaio-devel libaio-devel.i686 libgcc libgcc.i686 libstdc++ libstdc++.i686 libstdc++-devel make sysstat libXp libXt.i686 libXtst.i686 \
+    && echo "inventory_loc=/u01/app/oraInventory" >> /etc/oraInst.loc \
+    && echo "inst_group=oinstall" >> /etc/oraInst.loc 
+
+
+ #############################################
+# -------------------------------------------
+# Start new stage for installing the database
+# -------------------------------------------
+#############################################
+FROM base AS builder   
+
+# Copy binaries
+# -------------
+COPY $INSTALL_FILE_1 $INSTALL_FILE_2 $INSTALL_PSU $INSTALL_OPATCH $CONFIG_RSP $DBCA_CONFIG_RSP $INSTALL_OCM_FILE $INSTALL_DIR/
+
+RUN chown oracle:oinstall $INSTALL_DIR
+
+### install software only
+USER oracle
+WORKDIR /home/oracle
+RUN unzip $INSTALL_DIR/$INSTALL_FILE_1 \
+    && unzip $INSTALL_DIR/$INSTALL_FILE_2 \
+    && rm -rf $INSTALL_DIR/$INSTALL_FILE_1 $INSTALL_DIR/$INSTALL_FILE_2 \
+    && ~/database/runInstaller -silent -force -waitforcompletion -responseFile $INSTALL_DIR/$CONFIG_RSP -ignoresysprereqs -ignoreprereq \
+#
+# Fixed database PSU
+# -----------------
+    && mv $ORACLE_HOME/OPatch $ORACLE_HOME/OPatch.bak \
+    && unzip $INSTALL_DIR/$INSTALL_PSU \
+    && unzip $INSTALL_DIR/$INSTALL_OPATCH \
+    && cp -R ~/OPatch $ORACLE_HOME \
+    && source ~/.bash_profile \
+    && $ORACLE_HOME/OPatch/opatch napply ~/28204707 -ocmrf $INSTALL_DIR/$INSTALL_OCM_FILE -silent \
+    && rm -rf $ORACLE_HOME/apex \
+    && rm -rf $ORACLE_HOME/ords \
+    && rm -rf $ORACLE_HOME/sqldeveloper \
+    && rm -rf $ORACLE_HOME/ucp \
+    && rm -rf $ORACLE_HOME/lib/*.zip \
+    && rm -rf $ORACLE_HOME/inventory/backup/* \
+    && rm -rf $ORACLE_HOME/network/tools/help \
+    && rm -rf $ORACLE_HOME/assistants/dbua \
+    && rm -rf $ORACLE_HOME/dmu \
+    && rm -rf $ORACLE_HOME/install/pilot \
+    && rm -rf $ORACLE_HOME/suptools
+
+#############################################
+# -------------------------------------------
+# Start new layer for database runtime
+# -------------------------------------------
+#############################################
+FROM base
+USER oracle
+COPY --chown=oracle:oinstall --from=builder $ORACLE_BASE $ORACLE_BASE
+
+# DBCA
+# ----
+USER oracle
+WORKDIR /home/oracle
+RUN $ORACLE_HOME/bin/dbca -silent -responseFile $INSTALL_DIR/$DBCA_CONFIG_RSP \
+    && rm $INSTALL_DIR/$DBCA_CONFIG_RSP \
+    && printf 'lsnrctl start\n' >> $ORACLE_BASE/$RUN_FILE \
+    && printf 'sqlplus / as sysdba <<- EOF\n' >> $ORACLE_BASE/$RUN_FILE \
+    && printf 'startup;\n' >> $ORACLE_BASE/$RUN_FILE \
+    && printf 'exit;\n' >> $ORACLE_BASE/$RUN_FILE \
+    && printf 'EOF\n' >> $ORACLE_BASE/$RUN_FILE \
+    && echo "LISTENER = " >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "(DESCRIPTION_LIST = " >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "  (DESCRIPTION = " >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "    (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1)) " >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "    (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521)) " >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "  ) " >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo ") " >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "" >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "DEDICATED_THROUGH_BROKER_LISTENER=ON" >> $ORACLE_HOME/network/admin/listener.ora \
+    && echo "DIAG_ADR_ENABLED = off" >> $ORACLE_HOME/network/admin/listener.ora 
+
+## root execute scripts
+USER root
+WORKDIR /root
+RUN $ORACLE_HOME/root.sh
+
+EXPOSE 1521
+
+CMD exec $ORACLE_BASE/$RUN_FILE
+
+# docker builder prune -f && docker build -f Dockerfile . -t liaobaikai/oracle:11.2.0.4-ee --no-cache
+# docker run -dit --rm --name oracle11g --privileged liaobaikai/oracle:11.2.0.4-ee
+# docker run -dit --name oracle11g --privileged liaobaikai/oracle:11.2.0.4-ee
+# docker exec -it oracle11g bash
+# docker rmi liaobaikai/oracle:11.2.0.4-ee -f
