@@ -88,8 +88,8 @@ RUN unzip $INSTALL_DIR/$INSTALL_FILE_1 \
 # -------------------------------------------
 #############################################
 FROM base
-USER oracle
 COPY --chown=oracle:oinstall --from=builder $ORACLE_BASE $ORACLE_BASE
+COPY --chown=oracle:oinstall --from=builder $INSTALL_DIR/$DBCA_CONFIG_RSP $INSTALL_DIR/
 
 # DBCA
 # ----
@@ -111,7 +111,8 @@ RUN $ORACLE_HOME/bin/dbca -silent -responseFile $INSTALL_DIR/$DBCA_CONFIG_RSP \
     && echo ") " >> $ORACLE_HOME/network/admin/listener.ora \
     && echo "" >> $ORACLE_HOME/network/admin/listener.ora \
     && echo "DEDICATED_THROUGH_BROKER_LISTENER=ON" >> $ORACLE_HOME/network/admin/listener.ora \
-    && echo "DIAG_ADR_ENABLED = off" >> $ORACLE_HOME/network/admin/listener.ora 
+    && echo "DIAG_ADR_ENABLED = off" >> $ORACLE_HOME/network/admin/listener.ora \
+    && chmod +x $ORACLE_BASE/$RUN_FILE
 
 ## root execute scripts
 USER root
