@@ -38,8 +38,9 @@ RUN groupadd oinstall \
     && printf 'export LANG=en_US.UTF-8\n' >> /home/oracle/.bash_profile \
     && yum -y install psmisc unzip vi binutils compat-libstdc++-33 compat-libstdc++-33.i686 elfutils-libelf elfutils-libelf-devel gcc gcc-c++ glibc glibc.i686 glibc-common glibc-devel glibc-devel.i686 glibc-headers ksh libaio libaio.i686 libaio-devel libaio-devel.i686 libgcc libgcc.i686 libstdc++ libstdc++.i686 libstdc++-devel make sysstat libXp libXt.i686 libXtst.i686 \
     && echo "inventory_loc=/u01/app/oraInventory" >> /etc/oraInst.loc \
-    && echo "inst_group=oinstall" >> /etc/oraInst.loc 
-
+    && echo "inst_group=oinstall" >> /etc/oraInst.loc \
+    && mv /etc/localtime /etc/localtime.bak \
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
  #############################################
 # -------------------------------------------
